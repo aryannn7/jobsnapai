@@ -81,19 +81,20 @@ jobsnapai/
 └── README.md
 
 
-
 ---
 
-## How It Works (High-Level Flow)
+## System Flow (High Level)
 
-1. Resume is parsed and cleaned
-2. Skills are deterministically extracted with evidence
-3. Job or role requirements are evaluated
-4. Match percentage and skill gaps are computed
-5. A single high-impact next action is selected
-6. (Optional) AI explains *why* and *how* to improve
+1. Resume uploaded (PDF/DOCX)
+2. Text parsed and normalized
+3. Skills extracted deterministically with aliases
+4. Evidence snippets mapped to each skill
+5. Job or role requirements compared
+6. Match percentage computed
+7. Missing skills ranked
+8. One next high-impact action selected
+9. Optional AI reasoning layered on top
 
----
 
 ## Deployment
 
