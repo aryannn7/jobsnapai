@@ -1,7 +1,8 @@
 # Jobsnapai
 # JobSnapAI — Explainable AI Career Intelligence Platform
 
-**Live Demo:** https://jobsnapai-mvp-project.streamlit.app/  
+**Live Demo:** https://jobsnapai-mvp-project.streamlit.app/
+**Github:** https://github.com/aryannn7/jobsnapai
 **Tech Stack:** Python, Streamlit, OpenAI API, Modular Rule-Based Engine
 
 ---
