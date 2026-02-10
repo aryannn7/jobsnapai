@@ -1,101 +1,59 @@
 """
-core/progress.py
+core/parsing.py
 
-Lightweight progress tracking stored in a local JSON file.
+Convert resume files into plain text.
 
-Why:
-- Creates retention (streaks)
-- Gives the product a "daily habit" loop
-- Works locally without a database
-
-Later:
-- Replace JSON storage with a database (PostgreSQL) without changing app logic much.
+Contract:
+- No exceptions leak to app.py.
+- parse_resume returns: (file_type, extracted_text, error_message)
 """
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass, asdict
-from datetime import date, timedelta
-from pathlib import Path
-from typing import Dict, List, Optional
+import io
+from typing import Optional, Tuple
+
+import fitz  # PyMuPDF
+from docx import Document
 
 
-DEFAULT_PROGRESS_PATH = Path("data/progress.json")
-
-
-@dataclass
-class ProgressState:
-    """
-    Tracks user progress in a minimal way.
-    """
-    streak: int = 0
-    last_done: Optional[str] = None  # ISO date string "YYYY-MM-DD"
-    history: List[Dict[str, str]] = None  # list of {"date": "...", "skill": "...", "action": "..."}
-
-    def __post_init__(self):
-        if self.history is None:
-            self.history = []
-
-
-def load_progress(path: Path = DEFAULT_PROGRESS_PATH) -> ProgressState:
-    """
-    Load progress from JSON. If not found, return default state.
-    """
-    if not path.exists():
-        return ProgressState()
-
+def extract_text_from_pdf(file_bytes: bytes) -> Tuple[Optional[str], Optional[str]]:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return ProgressState(
-            streak=int(data.get("streak", 0)),
-            last_done=data.get("last_done"),
-            history=data.get("history", []) or [],
-        )
-    except Exception:
-        # If file gets corrupted, fail safe
-        return ProgressState()
+        pdf_document = fitz.open(stream=file_bytes, filetype="pdf")
+        text_blocks = []
+        for page in pdf_document:
+            text_blocks.append(page.get_text("text"))
+        return "\n".join(text_blocks).strip(), None
+    except Exception as e:
+        return None, f"Failed to read PDF: {type(e).__name__}: {e}"
 
 
-def save_progress(state: ProgressState, path: Path = DEFAULT_PROGRESS_PATH) -> None:
+def extract_text_from_docx(file_bytes: bytes) -> Tuple[Optional[str], Optional[str]]:
+    try:
+        buffer = io.BytesIO(file_bytes)
+        document = Document(buffer)
+        paragraphs = [p.text.strip() for p in document.paragraphs if p.text and p.text.strip()]
+        return "\n".join(paragraphs).strip(), None
+    except Exception as e:
+        return None, f"Failed to read DOCX: {type(e).__name__}: {e}"
+
+
+def parse_resume(filename: str, file_bytes: bytes) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """
-    Save progress to JSON.
+    Returns:
+        (file_type, extracted_text, error_message)
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(asdict(state), indent=2), encoding="utf-8")
+    try:
+        name = (filename or "").lower().strip()
 
+        if name.endswith(".pdf"):
+            text, err = extract_text_from_pdf(file_bytes)
+            return "pdf", text, err
 
-def mark_done(state: ProgressState, skill: str, action: str) -> ProgressState:
-    """
-    Mark today's task as done and update streak.
+        if name.endswith(".docx"):
+            text, err = extract_text_from_docx(file_bytes)
+            return "docx", text, err
 
-    Streak rules:
-    - If last_done is yesterday -> streak += 1
-    - If last_done is today -> no change
-    - Else -> streak = 1 (reset)
-    """
-    today = date.today()
-    today_str = today.isoformat()
-
-    if state.last_done == today_str:
-        # Already marked done today; no updates needed
-        return state
-
-    if state.last_done:
-        try:
-            last = date.fromisoformat(state.last_done)
-        except ValueError:
-            last = None
-    else:
-        last = None
-
-    if last and last == (today - timedelta(days=1)):
-        state.streak += 1
-    else:
-        state.streak = 1
-
-    state.last_done = today_str
-    state.history.insert(0, {"date": today_str, "skill": skill, "action": action})
-    state.history = state.history[:30]  # keep last 30 entries
-
-    return state
+        return None, None, "Unsupported file format. Please upload PDF or DOCX."
+    except Exception as e:
+        return None, None, f"Resume parsing failed: {type(e).__name__}: {e}"

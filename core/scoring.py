@@ -3,9 +3,10 @@ core/scoring.py
 
 Deterministic skill extraction + evidence snippets + match scoring.
 
-Key improvement:
-- Evidence is extracted from LINES + a small context window,
-  so we never display the entire resume as one blob.
+Key design:
+- Evidence is extracted from LINES + a small context window
+- Deterministic matching via alias regex patterns
+- Fast: patterns are pre-compiled once at import time
 """
 
 from __future__ import annotations
@@ -22,25 +23,40 @@ def _normalize_for_search(s: str) -> str:
 
 def _lines(text: str) -> List[str]:
     """
-    Split into meaningful lines. This relies on clean_text preserving newlines.
+    Split into meaningful lines (clean_text preserves newlines).
+    Filter out very short noise lines.
     """
     t = text or ""
     raw = [ln.strip() for ln in t.split("\n")]
-    # keep non-empty lines, and ignore very short noise
     return [ln for ln in raw if len(ln) >= 4]
 
 
-def _make_alias_pattern(aliases: List[str]) -> re.Pattern:
+def _compile_alias_pattern(aliases: List[str]) -> re.Pattern:
     """
-    Build a regex that matches aliases with word boundaries where possible.
-    """
-    escaped = [re.escape(a) for a in aliases if a.strip()]
-    if not escaped:
-        # match nothing
-        return re.compile(r"a^")
+    Build a regex that matches aliases. Use word boundaries where appropriate.
 
-    # Use word boundaries. Works well for most skills (SQL, Python, GitHub, etc.)
-    return re.compile(r"(?i)\b(" + "|".join(escaped) + r")\b")
+    Notes:
+    - For typical tokens (SQL, Python, Git), \b works well.
+    - For multi-word tokens, \b still works.
+    - We avoid matching nothing by returning a never-match pattern.
+    """
+    cleaned = [a.strip() for a in aliases if a and a.strip()]
+    if not cleaned:
+        return re.compile(r"a^")  # never matches
+
+    escaped = [re.escape(a) for a in cleaned]
+
+    # Case-insensitive match. Use word boundaries.
+    # Example: \bSQL\b, \bPower\ BI\b
+    pattern = r"(?i)\b(" + "|".join(escaped) + r")\b"
+    return re.compile(pattern)
+
+
+# Pre-compile patterns once
+_ALIAS_PATTERNS: Dict[str, re.Pattern] = {
+    canonical: _compile_alias_pattern(aliases)
+    for canonical, aliases in SKILL_ALIASES.items()
+}
 
 
 def _evidence_window(lines: List[str], hit_index: int, window: int = 1) -> str:
@@ -54,8 +70,10 @@ def _evidence_window(lines: List[str], hit_index: int, window: int = 1) -> str:
     end = min(len(lines), hit_index + window + 1)
     snippet = " | ".join(lines[start:end])
     snippet = _normalize_for_search(snippet)
-    # cap length so UI stays clean
-    return snippet[:260] + ("…" if len(snippet) > 260 else "")
+
+    if len(snippet) > 260:
+        return snippet[:260] + "…"
+    return snippet
 
 
 def extract_skills_with_evidence(text: str, max_snippets_per_skill: int = 2) -> Dict[str, List[str]]:
@@ -71,16 +89,13 @@ def extract_skills_with_evidence(text: str, max_snippets_per_skill: int = 2) -> 
     lines = _lines(text)
     found: Dict[str, List[str]] = {}
 
-    for canonical, aliases in SKILL_ALIASES.items():
-        pattern = _make_alias_pattern(aliases)
-
+    for canonical, pattern in _ALIAS_PATTERNS.items():
         hits: List[str] = []
         for idx, ln in enumerate(lines):
             if pattern.search(ln):
                 hits.append(_evidence_window(lines, idx, window=1))
-            if len(hits) >= max_snippets_per_skill:
-                break
-
+                if len(hits) >= max_snippets_per_skill:
+                    break
         if hits:
             found[canonical] = hits
 

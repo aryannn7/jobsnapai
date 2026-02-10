@@ -1,35 +1,34 @@
 """
 core/cleaning.py
 
-This module cleans raw extracted text.
-
-Why cleaning matters:
-- PDF extraction is noisy.
-- Clean text improves matching accuracy later.
+Cleaning utilities:
+- Preserve newlines so evidence snippets remain readable.
+- Deterministic, lightweight, no heavy NLP.
 """
+
+from __future__ import annotations
 
 import re
 
 
 def clean_text(text: str) -> str:
-    """
-    Clean and normalize text.
-
-    Steps:
-    1. Remove null characters.
-    2. Replace multiple spaces with one.
-    3. Reduce excessive blank lines.
-    """
     if not text:
         return ""
 
-    # Remove invisible null characters
-    text = text.replace("\x00", " ")
+    t = text.replace("\r\n", "\n").replace("\r", "\n")
 
-    # Replace multiple spaces or tabs with a single space
-    text = re.sub(r"[ \t]+", " ", text)
+    # normalize bullets into line breaks
+    for b in ("•", "●", "▪"):
+        t = t.replace(b, f"\n{b} ")
 
-    # Replace 3 or more newlines with exactly 2
-    text = re.sub(r"\n{3,}", "\n\n", text)
+    t = t.replace("–", "-")
 
-    return text.strip()
+    cleaned_lines = []
+    for line in t.split("\n"):
+        line = re.sub(r"[ \t]+", " ", line.strip())
+        if line:
+            cleaned_lines.append(line)
+
+    out = "\n".join(cleaned_lines)
+    out = re.sub(r"\n{3,}", "\n\n", out).strip()
+    return out
